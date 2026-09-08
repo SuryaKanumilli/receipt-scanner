@@ -41,6 +41,7 @@ tax, discounts, and total commonly appear.
 """
 
 
+
 def extract_receipt(image_path: Path) -> ReceiptExtraction:
     response = chat(
         model=MODEL_NAME,
@@ -52,11 +53,52 @@ def extract_receipt(image_path: Path) -> ReceiptExtraction:
             }
         ],
         format=ReceiptExtraction.model_json_schema(),
+
+        # IMPORTANT:
+        # We want structured extraction, not reasoning.
+        think=False,
+
+        stream=False,
+
         options={
-            "temperature": 0,
+            # Don't use exactly 0 while debugging.
+            "temperature": 0.1,
+
+            # Plenty of room for a long grocery receipt.
+            "num_predict": 4096,
         },
     )
 
+    content = response.message.content
+
+    # Better diagnostic than letting Pydantic fail on "".
+    if not content or not content.strip():
+
+        thinking = getattr(
+            response.message,
+            "thinking",
+            None,
+        )
+
+        done_reason = getattr(
+            response,
+            "done_reason",
+            None,
+        )
+
+        eval_count = getattr(
+            response,
+            "eval_count",
+            None,
+        )
+
+        raise RuntimeError(
+            "Ollama returned an empty response. "
+            f"done_reason={done_reason}, "
+            f"thinking_chars={len(thinking or '')}, "
+            f"eval_count={eval_count}"
+        )
+
     return ReceiptExtraction.model_validate_json(
-        response.message.content
+        content
     )
