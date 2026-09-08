@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1"
+    >
+
+    <title>Receipt Scanner</title>
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont,
+                "Segoe UI", sans-serif;
+            background: #f5f5f7;
+            color: #1d1d1f;
+        }
+
+        main {
+            max-width: 720px;
+            margin: auto;
+            padding: 24px 16px 60px;
+        }
+
+        h1 {
+            margin-bottom: 4px;
+        }
+
+        .subtitle {
+            color: #6e6e73;
+            margin-top: 0;
+        }
+
+        .card {
+            background: white;
+            border-radius: 18px;
+            padding: 20px;
+            margin-top: 20px;
+            box-shadow: 0 3px 20px rgba(0,0,0,.06);
+        }
+
+        input[type="file"] {
+            width: 100%;
+            margin-bottom: 16px;
+        }
+
+        button {
+            border: 0;
+            background: #007aff;
+            color: white;
+            font-size: 17px;
+            font-weight: 600;
+            border-radius: 12px;
+            padding: 13px 18px;
+            width: 100%;
+            cursor: pointer;
+        }
+
+        button:disabled {
+            opacity: .5;
+        }
+
+        #preview {
+            display: block;
+            max-width: 100%;
+            max-height: 420px;
+            margin: 0 auto 16px;
+            border-radius: 12px;
+        }
+
+        #status {
+            text-align: center;
+            margin-top: 14px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 12px;
+        }
+
+        th, td {
+            padding: 10px 6px;
+            border-bottom: 1px solid #eee;
+            text-align: right;
+        }
+
+        th:first-child,
+        td:first-child {
+            text-align: left;
+        }
+
+        .totals {
+            margin-top: 18px;
+        }
+
+        .total-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 4px 0;
+        }
+
+        .grand-total {
+            font-size: 20px;
+            font-weight: 700;
+            margin-top: 7px;
+        }
+
+        .warning {
+            background: #fff4d6;
+            padding: 10px;
+            margin-top: 8px;
+            border-radius: 8px;
+        }
+
+        .history-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 14px 0;
+            border-bottom: 1px solid #eee;
+        }
+
+        .muted {
+            color: #777;
+            font-size: 14px;
+        }
+
+        .receipt-image {
+            width: 100%;
+            max-height: 280px;
+            object-fit: contain;
+            border-radius: 10px;
+            margin-bottom: 12px;
+            background: #eee;
+        }
+    </style>
+</head>
+
+<body>
+
+<main>
+
+    <h1>Receipt Scanner</h1>
+
+    <p class="subtitle">
+        Local receipt extraction
+    </p>
+
+    <div class="card">
+
+        <form id="scanForm">
+
+            <input
+                id="receiptFile"
+                name="file"
+                type="file"
+                accept="image/*,.heic,.heif"
+                capture="environment"
+                required
+            >
+
+            <img
+                id="preview"
+                alt="Receipt preview"
+                hidden
+            >
+
+            <button
+                id="scanButton"
+                type="submit"
+            >
+                Scan Receipt
+            </button>
+
+        </form>
+
+        <div id="status"></div>
+
+    </div>
+
+    <section
+        id="result"
+        class="card"
+        hidden
+    ></section>
+
+    <section class="card">
+
+        <h2>Recent receipts</h2>
+
+        <div id="history">
+            Loading...
+        </div>
+
+    </section>
+
+</main>
+
+
+<script>
+
+const form = document.getElementById("scanForm");
+const fileInput = document.getElementById("receiptFile");
+const preview = document.getElementById("preview");
+const button = document.getElementById("scanButton");
+const status = document.getElementById("status");
+const result = document.getElementById("result");
+const history = document.getElementById("history");
+
+
+function escapeHtml(value) {
+
+    if (value === null || value === undefined) {
+        return "";
+    }
+
+    return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+}
+
+
+function money(value, currency = "USD") {
+
+    if (value === null || value === undefined) {
+        return "—";
+    }
+
+    try {
+
+        return new Intl.NumberFormat(
+            "en-US",
+            {
+                style: "currency",
+                currency: currency
+            }
+        ).format(value);
+
+    } catch {
+
+        return `${value}`;
+    }
+}
+
+
+fileInput.addEventListener(
+    "change",
+    () => {
+
+        const file = fileInput.files[0];
+
+        if (!file) {
+            preview.hidden = true;
+            return;
+        }
+
+        preview.src = URL.createObjectURL(file);
+        preview.hidden = false;
+    }
+);
+
+
+form.addEventListener(
+    "submit",
+    async (event) => {
+
+        event.preventDefault();
+
+        const file = fileInput.files[0];
+
+        if (!file) {
+            return;
+        }
+
+        button.disabled = true;
+        button.textContent = "Scanning...";
+
+        status.textContent =
+            "Reading receipt locally on your laptop...";
+
+        result.hidden = true;
+
+        const formData = new FormData();
+
+        formData.append(
+            "file",
+            file
+        );
+
+        try {
+
+            const response = await fetch(
+                "/api/receipts/scan",
+                {
+                    method: "POST",
+                    body: formData
+                }
+            );
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(
+                    data.detail || "Scan failed."
+                );
+            }
+
+            renderReceipt(data);
+
+            status.textContent =
+                "Receipt scanned successfully.";
+
+            await loadHistory();
+
+        } catch (error) {
+
+            status.textContent =
+                `Error: ${error.message}`;
+
+        } finally {
+
+            button.disabled = false;
+            button.textContent = "Scan Receipt";
+        }
+    }
+);
+
+
+function renderReceipt(data) {
+
+    const receipt = data.receipt;
+
+    const rows = receipt.items.map(
+        item => `
+            <tr>
+                <td>
+                    ${escapeHtml(item.name)}
+                    ${
+                        item.sku
+                        ? `<div class="muted">
+                            SKU: ${escapeHtml(item.sku)}
+                           </div>`
+                        : ""
+                    }
+                </td>
+
+                <td>
+                    ${item.quantity ?? "—"}
+                </td>
+
+                <td>
+                    ${money(
+                        item.unit_price,
+                        receipt.currency
+                    )}
+                </td>
+
+                <td>
+                    ${money(
+                        item.line_total,
+                        receipt.currency
+                    )}
+                </td>
+            </tr>
+        `
+    ).join("");
+
+
+    const discounts = receipt.discounts.map(
+        discount => `
+            <div class="total-row">
+                <span>
+                    ${escapeHtml(
+                        discount.description || "Discount"
+                    )}
+                </span>
+
+                <span>
+                    -${money(
+                        discount.amount,
+                        receipt.currency
+                    )}
+                </span>
+            </div>
+        `
+    ).join("");
+
+
+    const fees = receipt.fees.map(
+        fee => `
+            <div class="total-row">
+                <span>
+                    ${escapeHtml(fee.description)}
+                </span>
+
+                <span>
+                    ${money(
+                        fee.amount,
+                        receipt.currency
+                    )}
+                </span>
+            </div>
+        `
+    ).join("");
+
+
+    const warnings = data.warnings.map(
+        warning => `
+            <div class="warning">
+                ⚠️ ${escapeHtml(warning)}
+            </div>
+        `
+    ).join("");
+
+
+    result.innerHTML = `
+
+        <img
+            class="receipt-image"
+            src="${data.image_url}"
+            alt="Receipt"
+        >
+
+        <h2>
+            ${escapeHtml(
+                receipt.merchant || "Unknown Merchant"
+            )}
+        </h2>
+
+        <div class="muted">
+            ${escapeHtml(
+                receipt.purchase_date || "Unknown date"
+            )}
+        </div>
+
+        <table>
+
+            <thead>
+                <tr>
+                    <th>Item</th>
+                    <th>Qty</th>
+                    <th>Unit</th>
+                    <th>Total</th>
+                </tr>
+            </thead>
+
+            <tbody>
+                ${rows}
+            </tbody>
+
+        </table>
+
+        <div class="totals">
+
+            ${discounts}
+
+            <div class="total-row">
+                <span>Subtotal</span>
+                <span>
+                    ${money(
+                        receipt.subtotal,
+                        receipt.currency
+                    )}
+                </span>
+            </div>
+
+            ${fees}
+
+            <div class="total-row">
+                <span>Tax</span>
+                <span>
+                    ${money(
+                        receipt.tax,
+                        receipt.currency
+                    )}
+                </span>
+            </div>
+
+            ${
+                receipt.tip !== null
+                ? `
+                    <div class="total-row">
+                        <span>Tip</span>
+                        <span>
+                            ${money(
+                                receipt.tip,
+                                receipt.currency
+                            )}
+                        </span>
+                    </div>
+                  `
+                : ""
+            }
+
+            <div class="total-row grand-total">
+                <span>Total</span>
+                <span>
+                    ${money(
+                        receipt.total,
+                        receipt.currency
+                    )}
+                </span>
+            </div>
+
+        </div>
+
+        ${warnings}
+    `;
+
+    result.hidden = false;
+}
+
+
+async function loadHistory() {
+
+    try {
+
+        const response = await fetch(
+            "/api/receipts"
+        );
+
+        const receipts = await response.json();
+
+        if (!receipts.length) {
+
+            history.innerHTML =
+                `<div class="muted">
+                    No receipts scanned yet.
+                </div>`;
+
+            return;
+        }
+
+        history.innerHTML = receipts.map(
+            receipt => `
+                <div class="history-item">
+
+                    <div>
+                        <strong>
+                            ${escapeHtml(
+                                receipt.merchant ||
+                                "Unknown Merchant"
+                            )}
+                        </strong>
+
+                        <div class="muted">
+                            ${escapeHtml(
+                                receipt.purchase_date ||
+                                "Unknown date"
+                            )}
+                        </div>
+                    </div>
+
+                    <strong>
+                        ${money(
+                            receipt.total,
+                            receipt.currency
+                        )}
+                    </strong>
+
+                </div>
+            `
+        ).join("");
+
+    } catch {
+
+        history.innerHTML =
+            "Unable to load receipts.";
+    }
+}
+
+
+loadHistory();
+
+</script>
+
+</body>
+</html>
