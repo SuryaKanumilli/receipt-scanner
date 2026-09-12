@@ -3,7 +3,7 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
-from app.schemas import ReceiptExtraction
+from app.schemas import ItemClassificationBatch, ReceiptExtraction
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -32,7 +32,10 @@ def _from_cents(value: int | None) -> float | None:
 
 
 def init_db() -> None:
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    DB_PATH.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
 
     with _connect() as connection:
         connection.executescript(
@@ -52,24 +55,54 @@ def init_db() -> None:
                 created_at TEXT NOT NULL
             );
 
+
             CREATE TABLE IF NOT EXISTS receipt_items (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+
                 receipt_id TEXT NOT NULL,
                 position INTEGER NOT NULL,
+
                 name TEXT NOT NULL,
                 sku TEXT,
+
                 quantity REAL,
                 unit_price_cents INTEGER,
                 line_total_cents INTEGER,
+
+                category TEXT,
+                subcategory TEXT,
+
+                classification_status TEXT
+                    CHECK (
+                        classification_status IS NULL
+                        OR classification_status IN (
+                            'MATCHED',
+                            'NEEDS_NEW_TAXONOMY'
+                        )
+                    ),
+
+                classification_confidence REAL
+                    CHECK (
+                        classification_confidence IS NULL
+                        OR (
+                            classification_confidence >= 0
+                            AND classification_confidence <= 1
+                        )
+                    ),
+
+                taxonomy_version INTEGER,
 
                 FOREIGN KEY (receipt_id)
                     REFERENCES receipts(id)
                     ON DELETE CASCADE
             );
 
+
             CREATE TABLE IF NOT EXISTS discounts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+
                 receipt_id TEXT NOT NULL,
+
                 description TEXT,
                 amount_cents INTEGER NOT NULL,
                 associated_item_name TEXT,
@@ -79,14 +112,42 @@ def init_db() -> None:
                     ON DELETE CASCADE
             );
 
+
             CREATE TABLE IF NOT EXISTS fees (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+
                 receipt_id TEXT NOT NULL,
+
                 description TEXT NOT NULL,
                 amount_cents INTEGER NOT NULL,
 
                 FOREIGN KEY (receipt_id)
                     REFERENCES receipts(id)
+                    ON DELETE CASCADE
+            );
+
+
+            CREATE TABLE IF NOT EXISTS taxonomy_suggestions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+                receipt_item_id INTEGER NOT NULL,
+
+                proposed_category TEXT NOT NULL,
+                proposed_subcategory TEXT NOT NULL,
+
+                status TEXT NOT NULL DEFAULT 'PENDING'
+                    CHECK (
+                        status IN (
+                            'PENDING',
+                            'APPROVED',
+                            'REJECTED'
+                        )
+                    ),
+
+                created_at TEXT NOT NULL,
+
+                FOREIGN KEY (receipt_item_id)
+                    REFERENCES receipt_items(id)
                     ON DELETE CASCADE
             );
             """
@@ -97,10 +158,36 @@ def insert_receipt(
     receipt_id: str,
     image_filename: str,
     receipt: ReceiptExtraction,
+    classifications: ItemClassificationBatch,
+    taxonomy_version: int,
     warnings: list[str],
 ) -> None:
 
+    classification_by_index = {
+        classification.item_index: classification
+        for classification in classifications.classifications
+    }
+
+    expected_indexes = set(
+        range(len(receipt.items))
+    )
+
+    actual_indexes = set(
+        classification_by_index.keys()
+    )
+
+    if actual_indexes != expected_indexes:
+        raise ValueError(
+            "Classifier did not return exactly one "
+            "classification for every receipt item."
+        )
+
     with _connect() as connection:
+
+        # ---------------------------------
+        # Save the receipt itself
+        # ---------------------------------
+
         connection.execute(
             """
             INSERT INTO receipts (
@@ -139,8 +226,19 @@ def insert_receipt(
             ),
         )
 
-        for position, item in enumerate(receipt.items):
-            connection.execute(
+        # ---------------------------------
+        # Save every receipt item
+        # ---------------------------------
+
+        for position, item in enumerate(
+            receipt.items
+        ):
+
+            classification = (
+                classification_by_index[position]
+            )
+
+            cursor = connection.execute(
                 """
                 INSERT INTO receipt_items (
                     receipt_id,
@@ -149,9 +247,18 @@ def insert_receipt(
                     sku,
                     quantity,
                     unit_price_cents,
-                    line_total_cents
+                    line_total_cents,
+
+                    category,
+                    subcategory,
+                    classification_status,
+                    classification_confidence,
+                    taxonomy_version
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (
+                    ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?
+                )
                 """,
                 (
                     receipt_id,
@@ -161,10 +268,65 @@ def insert_receipt(
                     item.quantity,
                     _to_cents(item.unit_price),
                     _to_cents(item.line_total),
+
+                    classification.category,
+                    classification.subcategory,
+                    classification.status,
+                    classification.confidence,
+                    taxonomy_version,
                 ),
             )
 
+            receipt_item_id = cursor.lastrowid
+
+            # ---------------------------------
+            # Unknown taxonomy item?
+            # Save a pending suggestion.
+            # ---------------------------------
+
+            if (
+                classification.status
+                == "NEEDS_NEW_TAXONOMY"
+            ):
+
+                if (
+                    not classification.proposed_category
+                    or not classification.proposed_subcategory
+                ):
+                    raise ValueError(
+                        "A NEEDS_NEW_TAXONOMY item "
+                        "must provide a proposed category "
+                        "and subcategory."
+                    )
+
+                connection.execute(
+                    """
+                    INSERT INTO taxonomy_suggestions (
+                        receipt_item_id,
+                        proposed_category,
+                        proposed_subcategory,
+                        status,
+                        created_at
+                    )
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        receipt_item_id,
+                        classification.proposed_category,
+                        classification.proposed_subcategory,
+                        "PENDING",
+                        datetime.now(
+                            timezone.utc
+                        ).isoformat(),
+                    ),
+                )
+
+        # ---------------------------------
+        # Discounts
+        # ---------------------------------
+
         for discount in receipt.discounts:
+
             connection.execute(
                 """
                 INSERT INTO discounts (
@@ -183,7 +345,12 @@ def insert_receipt(
                 ),
             )
 
+        # ---------------------------------
+        # Fees
+        # ---------------------------------
+
         for fee in receipt.fees:
+
             connection.execute(
                 """
                 INSERT INTO fees (
@@ -295,14 +462,33 @@ def get_receipt(receipt_id: str) -> dict | None:
         "items": [
             {
                 "id": row["id"],
+
                 "name": row["name"],
                 "sku": row["sku"],
+
                 "quantity": row["quantity"],
+
                 "unit_price": _from_cents(
                     row["unit_price_cents"]
                 ),
+
                 "line_total": _from_cents(
                     row["line_total_cents"]
+                ),
+
+                "category": row["category"],
+                "subcategory": row["subcategory"],
+
+                "classification_status": (
+                    row["classification_status"]
+                ),
+
+                "classification_confidence": (
+                    row["classification_confidence"]
+                ),
+
+                "taxonomy_version": (
+                    row["taxonomy_version"]
                 ),
             }
             for row in items

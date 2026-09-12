@@ -14,10 +14,12 @@ from app.db import (
     list_receipts,
 )
 from app.services.image_service import normalize_receipt_image
+from app.services.item_classifier import classify_items
 from app.services.receipt_extractor import (
     MODEL_NAME,
     extract_receipt,
 )
+from app.services.taxonomy_service import get_taxonomy_version
 from app.services.validation import build_warnings
 
 
@@ -126,8 +128,9 @@ async def scan_receipt(
         ) from exc
 
     try:
-        # Ollama inference is blocking work.
-        # Run it outside FastAPI's async event loop.
+        # Step 1: Extract receipt contents from the image.
+        # Ollama inference is blocking work, so run it
+        # outside FastAPI's async event loop.
         extraction = await run_in_threadpool(
             extract_receipt,
             image_path,
@@ -141,12 +144,41 @@ async def scan_receipt(
             detail=f"Receipt extraction failed: {exc}",
         ) from exc
 
-    warnings = build_warnings(extraction)
 
+    try:
+        # Step 2: Classify every extracted receipt item.
+        classifications = await run_in_threadpool(
+            classify_items,
+            extraction,
+        )
+
+    except Exception as exc:
+        image_path.unlink(missing_ok=True)
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"Item classification failed: {exc}",
+        ) from exc
+
+
+    # Step 3: Get the current taxonomy version.
+    taxonomy_version = get_taxonomy_version()
+
+
+    # Step 4: Run deterministic receipt validation.
+    warnings = build_warnings(
+        extraction
+    )
+
+
+    # Step 5: Save the receipt, items, classifications,
+    # and any taxonomy suggestions.
     insert_receipt(
         receipt_id=receipt_id,
         image_filename=image_path.name,
         receipt=extraction,
+        classifications=classifications,
+        taxonomy_version=taxonomy_version,
         warnings=warnings,
     )
 

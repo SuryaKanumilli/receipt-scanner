@@ -1,0 +1,116 @@
+{
+  "version": 1,
+  "categories": {
+    "Groceries": [
+      "Produce",
+      "Meat & Seafood",
+      "Dairy & Eggs",
+      "Bakery",
+      "Breakfast & Cereal",
+      "Pantry",
+      "Baking & Cooking",
+      "Snacks & Sweets",
+      "Beverages",
+      "Frozen & Prepared Foods",
+      "Condiments & Sauces",
+      "Alcohol"
+    ],
+
+    "Dining": [
+      "Restaurant",
+      "Fast Food",
+      "Coffee & Cafe",
+      "Delivery"
+    ],
+
+    "Household": [
+      "Cleaning",
+      "Paper & Disposable",
+      "Laundry",
+      "Kitchen & Storage",
+      "Home Supplies"
+    ],
+
+    "Personal Care": [
+      "Toiletries",
+      "Skincare",
+      "Haircare",
+      "Cosmetics"
+    ],
+
+    "Health": [
+      "OTC Medication",
+      "First Aid",
+      "Medical Supplies",
+      "Wellness"
+    ],
+
+    "Baby": [
+      "Diapers & Wipes",
+      "Feeding",
+      "Baby Food",
+      "Clothing",
+      "Gear"
+    ],
+
+    "Pet": [
+      "Pet Food",
+      "Treats",
+      "Supplies"
+    ],
+
+    "Apparel": [
+      "Clothing",
+      "Shoes",
+      "Accessories"
+    ],
+
+    "Electronics": [
+      "Computers",
+      "Phones",
+      "Accessories",
+      "Audio",
+      "Home Electronics"
+    ],
+
+    "Home": [
+      "Furniture",
+      "Decor",
+      "Appliances",
+      "Tools",
+      "Garden"
+    ],
+
+    "Automotive": [
+      "Fuel",
+      "Maintenance",
+      "Parts & Accessories"
+    ],
+
+    "Entertainment": [
+      "Books",
+      "Games",
+      "Movies & Music",
+      "Events"
+    ],
+
+    "Travel": [
+      "Flights",
+      "Hotels",
+      "Transportation"
+    ],
+
+    "Services": [
+      "Subscription",
+      "Professional Service",
+      "Repair"
+    ],
+
+    "Fees": [
+      "Shopping Bag",
+      "Deposit",
+      "Service Fee",
+      "Other Fee"
+    ]
+  }
+}

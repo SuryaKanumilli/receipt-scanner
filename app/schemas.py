@@ -1,5 +1,5 @@
 from datetime import date
-
+from typing import Literal
 from pydantic import BaseModel, Field
 
 
@@ -65,3 +65,27 @@ class ReceiptExtraction(BaseModel):
     tax: float | None = None
     tip: float | None = None
     total: float | None = None
+
+
+class ItemClassification(BaseModel):
+    item_index: int
+
+    category: str | None = None
+    subcategory: str | None = None
+
+    status: Literal[
+        "MATCHED",
+        "NEEDS_NEW_TAXONOMY"
+    ]
+
+    confidence: float = Field(
+        ge=0,
+        le=1,
+    )
+
+    proposed_category: str | None = None
+    proposed_subcategory: str | None = None
+
+
+class ItemClassificationBatch(BaseModel):
+    classifications: list[ItemClassification]
