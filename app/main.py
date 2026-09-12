@@ -173,20 +173,37 @@ async def scan_receipt(
 
     # Step 5: Save the receipt, items, classifications,
     # and any taxonomy suggestions.
-    insert_receipt(
-        receipt_id=receipt_id,
-        image_filename=image_path.name,
-        receipt=extraction,
-        classifications=classifications,
-        taxonomy_version=taxonomy_version,
-        warnings=warnings,
-    )
+    try:
+        insert_receipt(
+            receipt_id=receipt_id,
+            image_filename=image_path.name,
+            receipt=extraction,
+            classifications=classifications,
+            taxonomy_version=taxonomy_version,
+            warnings=warnings,
+        )
+
+    except Exception as exc:
+        image_path.unlink(missing_ok=True)
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to save receipt: {exc}",
+        ) from exc
+
+
+    saved_receipt = get_receipt(receipt_id)
+
+    if saved_receipt is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Receipt could not be retrieved after saving.",
+        )
+
 
     return {
         "id": receipt_id,
         "image_url": f"/receipts/{image_path.name}",
         "warnings": warnings,
-        "receipt": extraction.model_dump(
-            mode="json"
-        ),
+        "receipt": saved_receipt,
     }

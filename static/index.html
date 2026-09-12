@@ -140,6 +140,20 @@
             margin-bottom: 12px;
             background: #eee;
         }
+
+        .category-label {
+            margin-top: 5px;
+            font-size: 13px;
+            color: #007aff;
+            font-weight: 500;
+        }
+
+        .category-warning {
+            margin-top: 5px;
+            font-size: 13px;
+            color: #b26a00;
+            font-weight: 600;
+        }
     </style>
 </head>
 
@@ -344,14 +358,37 @@ function renderReceipt(data) {
         item => `
             <tr>
                 <td>
-                    ${escapeHtml(item.name)}
+
+                    <strong>
+                        ${escapeHtml(item.name)}
+                    </strong>
+
                     ${
                         item.sku
-                        ? `<div class="muted">
-                            SKU: ${escapeHtml(item.sku)}
-                           </div>`
+                        ? `
+                            <div class="muted">
+                                SKU: ${escapeHtml(item.sku)}
+                            </div>
+                        `
                         : ""
                     }
+
+                    ${
+                        item.classification_status === "MATCHED"
+                        ? `
+                            <div class="category-label">
+                                ${escapeHtml(item.category)}
+                                ›
+                                ${escapeHtml(item.subcategory)}
+                            </div>
+                        `
+                        : `
+                            <div class="category-warning">
+                                ⚠ Needs classification
+                            </div>
+                        `
+                    }
+
                 </td>
 
                 <td>
